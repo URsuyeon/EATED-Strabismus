@@ -1,23 +1,30 @@
 import cv2
 import mediapipe as mp
 import os
+import shutil
 from pathlib import Path
 import numpy as np
 from PIL import Image
+import random
 
 # 상수 정의
 PADDING = 30  # 눈 이미지의 가장자리에 추가할 패딩 크기
-FACE_SIZE = (1024,1024)  # 얼굴 이미지를 크롭한 후 조정할 크기
+FACE_SIZE = (1024, 1024)  # 얼굴 이미지를 크롭한 후 조정할 크기
 FINAL_SIZE = (32, 32)  # 최종 눈 이미지의 크기
 threshold_X = 0.36  # 시선 방향 판단의 X임계값
 threshold_Y = 0.46  # 시선 방향 판단의 Y임계값
+
+# 데이터 비율
+TRAIN_RATIO = 0.64
+VALIDATION_RATIO = 0.16
+TEST_RATIO = 0.20
 
 # Mediapipe 초기화
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     static_image_mode=True,  # 정적인 이미지 모드
-    max_num_faces=1,         # 최대 얼굴 수
-    refine_landmarks=True,   # 랜드마크 정제 여부
+    max_num_faces=1,  # 최대 얼굴 수
+    refine_landmarks=True,  # 랜드마크 정제 여부
     min_detection_confidence=0.5  # 최소 검출 신뢰도
 )
 mp_face_detection = mp.solutions.face_detection
@@ -87,7 +94,7 @@ def extract_eye_image(image, eye_points):
     """
     x, y, w, h = cv2.boundingRect(eye_points)
     eye_image = image[max(y - PADDING, 0):min(y + h + PADDING, image.shape[0]),
-                      max(x - PADDING, 0):min(x + w + PADDING, image.shape[1])]
+                max(x - PADDING, 0):min(x + w + PADDING, image.shape[1])]
     return cv2.resize(eye_image, FINAL_SIZE)
 
 
@@ -246,13 +253,63 @@ def process_folder(input_folder, output_folder):
             process_image(image_path, output_folder)
 
 
-# 입력 폴더 내의 서브 폴더를 사용자명으로 사용
+def split_data(input_folder, output_folder, train_ratio, validation_ratio, test_ratio):
+    """
+    데이터를 Train, Validation, Test 폴더로 나눕니다.
+    :param input_folder: 입력 폴더 경로
+    :param output_folder: 출력 폴더 경로
+    :param train_ratio: 학습 데이터 비율
+    :param validation_ratio: 검증 데이터 비율
+    :param test_ratio: 테스트 데이터 비율
+    """
+    # 출력 폴더 및 하위 폴더 생성
+    Path(output_folder).mkdir(parents=True, exist_ok=True)
+    train_folder = os.path.join(output_folder, 'train')
+    validation_folder = os.path.join(output_folder, 'validation')
+    test_folder = os.path.join(output_folder, 'test')
+
+    for folder in [train_folder, validation_folder, test_folder]:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+
+    # 이미지 파일 목록 가져오기
+    image_files = [f for f in os.listdir(input_folder) if f.lower().endswith(('png', 'jpg', 'jpeg'))]
+    random.shuffle(image_files)  # 데이터 섞기
+
+    # 데이터 나누기
+    total_files = len(image_files)
+    train_end = int(total_files * train_ratio)
+    validation_end = int(total_files * (train_ratio + validation_ratio))
+
+    train_files = image_files[:train_end]
+    validation_files = image_files[train_end:validation_end]
+    test_files = image_files[validation_end:]
+
+    # 파일 이동
+    for file in train_files:
+        shutil.copy(os.path.join(input_folder, file), os.path.join(train_folder, file))
+    for file in validation_files:
+        shutil.copy(os.path.join(input_folder, file), os.path.join(validation_folder, file))
+    for file in test_files:
+        shutil.copy(os.path.join(input_folder, file), os.path.join(test_folder, file))
+
+    print(
+        f"Data split completed:\n- Train: {len(train_files)} files\n- Validation: {len(validation_files)} files\n- Test: {len(test_files)} files")
+
+
+# 데이터 분할 및 이미지 처리
 user_folders = [f for f in os.listdir(base_input_folder) if os.path.isdir(os.path.join(base_input_folder, f))]
 
 for username in user_folders:
     input_folder = os.path.join(base_input_folder, username)
-    output_folder = os.path.join(base_output_folder, username)
+    split_folder = os.path.join(base_output_folder, 'splits', username)
 
-    process_folder(input_folder, output_folder)
+    # 데이터 분할
+    split_data(input_folder, split_folder, TRAIN_RATIO, VALIDATION_RATIO, TEST_RATIO)
+
+    # 각 서브 폴더에서 이미지 처리
+    for subset in ['train', 'validation', 'test']:
+        subset_folder = os.path.join(split_folder, subset)
+        output_folder = os.path.join(base_output_folder, subset, username)
+        process_folder(subset_folder, output_folder)
 
 print("Processing completed.")
