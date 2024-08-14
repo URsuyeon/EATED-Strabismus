@@ -79,15 +79,14 @@ threshold_X / threshold_Y: 동공 위치에 따라 시선 방향을 결정할 �
 ## 코드 실행
 이미지를 분석하고 결과를 시각화하려면, analyze_image_with_landmarks와 display_results 함수를 실행합니다. 아래의 샘플 코드에서 image_path에 사용할 이미지 경로를 설정하세요.
 
-'''
-  #이미지 경로 설정
-  image_path = r'C:\Users\user\PycharmProjects\eated\data\eyes\Jye\20240806_213852(0).jpg'
+```
+#이미지 경로 설정
+image_path = r'C:\Users\user\PycharmProjects\eated\data\eyes\Jye\20240806_213852(0).jpg'
   
-
-  #이미지 분석 및 시각화
-  original_image, annotated_image = analyze_image_with_landmarks(image_path)
-  display_results(original_image, annotated_image)
-'''
+#이미지 분석 및 시각화
+original_image, annotated_image = analyze_image_with_landmarks(image_path)
+display_results(original_image, annotated_image)
+```
 
 
 ## 코드 설명
