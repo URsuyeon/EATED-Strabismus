@@ -82,7 +82,7 @@ threshold_X / threshold_Y: 동공 위치에 따라 시선 방향을 결정할 �
 
 ```
 #이미지 경로 설정
-image_path = r'C:\Users\user\PycharmProjects\eated\data\eyes\Jye\20240806_213852(0).jpg'
+image_path = r'image path'
   
 #이미지 분석 및 시각화
 original_image, annotated_image = analyze_image_with_landmarks(image_path)
