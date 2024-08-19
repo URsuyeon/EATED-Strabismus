@@ -63,11 +63,11 @@ history = model.fit(
     validation_data=val_ds
 )
 
-# 모델 저장
-model.save('C:/Users/user/Desktop/data/AI/my_model.keras')  # .keras 확장자 사용
+# 모델 저장 (SavedModel 형식)
+model.save('C:/Users/user/Desktop/data/AI/my_model')  # SavedModel 형식
 
 # 모델 로드
-loaded_model = tf.keras.models.load_model('C:/Users/user/Desktop/data/AI/my_model.keras')
+loaded_model = tf.keras.models.load_model('C:/Users/user/Desktop/data/AI/my_model')
 
 # 테스트 데이터로 평가
 test_loss, test_accuracy, test_auc = loaded_model.evaluate(test_ds)
