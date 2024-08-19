@@ -1,41 +1,35 @@
 import cv2
 import mediapipe as mp
+import numpy as np
 import os
 from pathlib import Path
-import numpy as np
-from PIL import Image
 
 # 상수 정의
 PADDING = 30
-FACE_SIZE = (1048, 1048)
-FINAL_SIZE = (256, 256)
-threshold = 0.35
+FACE_SIZE = (1024, 1024)
+FINAL_SIZE = (32, 16)
+threshold_X = 0
+threshold_Y = 0.1
+threshold_close = 0.28
 
 # Mediapipe 초기화
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    static_image_mode=True,
-    max_num_faces=1,
-    refine_landmarks=True,
-    min_detection_confidence=0.5
-)
+face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True, min_detection_confidence=0.5)
 mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
 
 # 입력 폴더와 출력 폴더의 기본 경로
-base_input_folder = r'C:\Users\user\PycharmProjects\eated\data\eyes'
-base_output_folder = r'C:\Users\user\PycharmProjects\eated\data\cropped'
+base_input_folder = r'C:\Users\user\Desktop\data\eyes'
+base_output_folder = r'C:\Users\user\Desktop\data\cropped'
 
 # 눈의 랜드마크 인덱스 정의
 LEFT_EYE_INDICES = [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7]
 RIGHT_EYE_INDICES = [263, 466, 388, 387, 386, 385, 384, 398, 362, 382, 381, 380, 374, 373, 390, 249]
-
-# 눈동자 중심 랜드마크 인덱스 정의
 LEFT_IRIS_CENTER_INDEX = 468
 RIGHT_IRIS_CENTER_INDEX = 473
 
 
 def crop_face(image, detection):
+    """얼굴 이미지에서 얼굴 부분을 크롭"""
     ih, iw, _ = image.shape
     bboxC = detection.location_data.relative_bounding_box
     x_min = int(max(bboxC.xmin * iw, 0))
@@ -45,108 +39,89 @@ def crop_face(image, detection):
 
     if x_min >= x_max or y_min >= y_max:
         return None
-
     cropped_face = image[y_min:y_max, x_min:x_max]
-    if cropped_face.size == 0:
-        return None
-
-    return cv2.resize(cropped_face, FACE_SIZE)
+    return cv2.resize(cropped_face, FACE_SIZE) if cropped_face.size > 0 else None
 
 
-def detect_eyes(face_image):
-    results = face_mesh.process(face_image)
-    if not results.multi_face_landmarks:
-        return None, None
-
-    face_landmarks = results.multi_face_landmarks[0]
-    left_eye_points = [(int(face_landmarks.landmark[idx].x * face_image.shape[1]),
-                        int(face_landmarks.landmark[idx].y * face_image.shape[0])) for idx in LEFT_EYE_INDICES]
-    right_eye_points = [(int(face_landmarks.landmark[idx].x * face_image.shape[1]),
-                         int(face_landmarks.landmark[idx].y * face_image.shape[0])) for idx in RIGHT_EYE_INDICES]
-    return np.array(left_eye_points), np.array(right_eye_points)
-
-
-def extract_eye_image(image, eye_points):
-    x, y, w, h = cv2.boundingRect(eye_points)
-    eye_image = image[max(y - PADDING, 0):min(y + h + PADDING, image.shape[0]),
-                      max(x - PADDING, 0):min(x + w + PADDING, image.shape[1])]
-    return cv2.resize(eye_image, FINAL_SIZE)
-
-
-def combine_eyes(left_eye, right_eye):
-    combined_height = left_eye.shape[0] + right_eye.shape[0]
-    combined_width = max(left_eye.shape[1], right_eye.shape[1])
-    combined_image = np.zeros((combined_height, combined_width, 3), dtype=np.uint8)
-    combined_image[:left_eye.shape[0], :left_eye.shape[1]] = left_eye
-    combined_image[left_eye.shape[0]:, :right_eye.shape[1]] = right_eye
-    return cv2.resize(combined_image, FINAL_SIZE)
-
-
-def calculate_eye_center(face_landmarks, eye_indices, image_shape):
-    eye_landmarks = [face_landmarks.landmark[idx] for idx in eye_indices]
-    x = sum([lm.x for lm in eye_landmarks]) / len(eye_landmarks) * image_shape[1]
-    y = sum([lm.y for lm in eye_landmarks]) / len(eye_landmarks) * image_shape[0]
-    return int(x), int(y)
-
-
-def determine_iris_position(eye_center, iris_center):
+def determine_iris_position(eye_center, iris_center, eye_aspect_ratio):
+    """눈동자의 위치에 따라 눈의 방향을 결정"""
     x_ratio = (iris_center[0] - eye_center[0]) / (FINAL_SIZE[0] / 2)
     y_ratio = (iris_center[1] - eye_center[1]) / (FINAL_SIZE[1] / 2)
 
-
-    if abs(x_ratio) > (0.5-threshold):
+    if eye_aspect_ratio < threshold_close:
+        return 'Down'
+    if abs(x_ratio) > (0.5 - threshold_X):
         return 'Left' if x_ratio < 0 else 'Right'
-    if abs(y_ratio) > (0.4-threshold):
+    if abs(y_ratio) > (0.5 - threshold_Y):
         return 'Up' if y_ratio < 0 else 'Down'
     return 'Center'
 
 
 def detect_and_crop_eyes(face_image):
-    face_image_pil = Image.fromarray(cv2.cvtColor(face_image, cv2.COLOR_BGR2RGB))
-    resized_image_pil = face_image_pil.resize(FACE_SIZE)
-    resized_image = cv2.cvtColor(np.array(resized_image_pil), cv2.COLOR_RGB2BGR)
+    """얼굴 이미지에서 눈을 검출하고 크롭"""
+    resized_image = cv2.resize(face_image, FACE_SIZE)
 
     results = face_mesh.process(resized_image)
     if not results.multi_face_landmarks:
-        return None, None, None
+        return None, None, None, None
 
     face_landmarks = results.multi_face_landmarks[0]
 
-    # Calculate eye centers
-    left_eye_center = calculate_eye_center(face_landmarks, LEFT_EYE_INDICES, resized_image.shape)
-    right_eye_center = calculate_eye_center(face_landmarks, RIGHT_EYE_INDICES, resized_image.shape)
+    # 눈 중심 좌표 계산
+    left_eye_landmarks = [face_landmarks.landmark[idx] for idx in LEFT_EYE_INDICES]
+    right_eye_landmarks = [face_landmarks.landmark[idx] for idx in RIGHT_EYE_INDICES]
 
-    # Calculate iris centers
+    left_eye_x = sum([lm.x for lm in left_eye_landmarks]) / len(left_eye_landmarks) * resized_image.shape[1]
+    left_eye_y = sum([lm.y for lm in left_eye_landmarks]) / len(left_eye_landmarks) * resized_image.shape[0]
+    left_eye_center = int(left_eye_x), int(left_eye_y)
+
+    right_eye_x = sum([lm.x for lm in right_eye_landmarks]) / len(right_eye_landmarks) * resized_image.shape[1]
+    right_eye_y = sum([lm.y for lm in right_eye_landmarks]) / len(right_eye_landmarks) * resized_image.shape[0]
+    right_eye_center = int(right_eye_x), int(right_eye_y)
+
     left_iris_center = (int(face_landmarks.landmark[LEFT_IRIS_CENTER_INDEX].x * resized_image.shape[1]),
                         int(face_landmarks.landmark[LEFT_IRIS_CENTER_INDEX].y * resized_image.shape[0]))
     right_iris_center = (int(face_landmarks.landmark[RIGHT_IRIS_CENTER_INDEX].x * resized_image.shape[1]),
                          int(face_landmarks.landmark[RIGHT_IRIS_CENTER_INDEX].y * resized_image.shape[0]))
 
-    # Determine eye direction
-    left_iris_status = determine_iris_position(left_eye_center, left_iris_center)
-    right_iris_status = determine_iris_position(right_eye_center, right_iris_center)
+    left_eye_points = np.array([(int(face_landmarks.landmark[idx].x * resized_image.shape[1]),
+                                 int(face_landmarks.landmark[idx].y * resized_image.shape[0])) for idx in LEFT_EYE_INDICES])
+    right_eye_points = np.array([(int(face_landmarks.landmark[idx].x * resized_image.shape[1]),
+                                  int(face_landmarks.landmark[idx].y * resized_image.shape[0])) for idx in RIGHT_EYE_INDICES])
 
-    iris_status = f"Left: {left_iris_status}, Right: {right_iris_status}"
+    # 눈의 세로/가로 비율을 직접 계산
+    left_eye_rect = cv2.boundingRect(left_eye_points)
+    _, _, w_left, h_left = left_eye_rect
+    left_eye_aspect_ratio = h_left / w_left if w_left != 0 else 0
 
-    # Extract and resize eye images
-    def extract_and_resize_eye_image(eye_indices):
-        eye_points = [(int(face_landmarks.landmark[idx].x * resized_image.shape[1]),
-                       int(face_landmarks.landmark[idx].y * resized_image.shape[0])) for idx in eye_indices]
-        return extract_eye_image(resized_image, np.array(eye_points))
+    right_eye_rect = cv2.boundingRect(right_eye_points)
+    _, _, w_right, h_right = right_eye_rect
+    right_eye_aspect_ratio = h_right / w_right if w_right != 0 else 0
 
-    left_eye_image = extract_and_resize_eye_image(LEFT_EYE_INDICES)
-    right_eye_image = extract_and_resize_eye_image(RIGHT_EYE_INDICES)
+    left_iris_status = determine_iris_position(left_eye_center, left_iris_center, left_eye_aspect_ratio)
+    right_iris_status = determine_iris_position(right_eye_center, right_iris_center, right_eye_aspect_ratio)
 
-    return left_eye_image, right_eye_image, iris_status
+    # 눈 이미지 추출 및 크기 조정
+    x_left, y_left, w_left, h_left = cv2.boundingRect(left_eye_points)
+    left_eye_image = resized_image[max(y_left - PADDING, 0):min(y_left + h_left + PADDING, resized_image.shape[0]),
+                                   max(x_left - PADDING, 0):min(x_left + w_left + PADDING, resized_image.shape[1])]
+    left_eye_image = cv2.resize(left_eye_image, FINAL_SIZE)
+
+    x_right, y_right, w_right, h_right = cv2.boundingRect(right_eye_points)
+    right_eye_image = resized_image[max(y_right - PADDING, 0):min(y_right + h_right + PADDING, resized_image.shape[0]),
+                                    max(x_right - PADDING, 0):min(x_right + w_right + PADDING, resized_image.shape[1])]
+    right_eye_image = cv2.resize(right_eye_image, FINAL_SIZE)
+
+    return left_eye_image, right_eye_image, left_iris_status, right_iris_status
 
 
-def process_image(image_path, output_folder):
+def process_image(image_path, output_folder, username):
+    """이미지를 처리하고 결과를 저장"""
     image = cv2.imread(image_path)
     if image is None:
         print(f"Error loading image {image_path}")
         return
 
-    # Detect face and crop
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     with mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5) as face_detection:
         detection_results = face_detection.process(image_rgb)
@@ -156,52 +131,47 @@ def process_image(image_path, output_folder):
 
         cropped_face = crop_face(image, detection_results.detections[0])
         if cropped_face is None:
-            print(f"Failed to crop face for {image_path}")
+            print(f"Error cropping face in {image_path}")
             return
 
-    # Detect and crop eyes
-    left_eye, right_eye, iris_status = detect_and_crop_eyes(cropped_face)
-    if left_eye is None or right_eye is None:
-        print(f"Failed to detect eyes for {image_path}")
-        return
+        left_eye, right_eye, left_iris_status, right_iris_status = detect_and_crop_eyes(cropped_face)
+        if left_eye is None or right_eye is None:
+            print(f"Could not detect both eyes in {image_path}")
+            return
 
-    # Combine eyes and save results
-    final_image = combine_eyes(left_eye, right_eye)
-    filename = os.path.basename(image_path)
-    name, ext = os.path.splitext(filename)
-    final_image_path = os.path.join(output_folder, f"{name}_combined{ext}")
-    cv2.imwrite(final_image_path, final_image)
+        # 왼쪽 눈과 오른쪽 눈 폴더 설정
+        left_eye_folder = os.path.join(output_folder, "left_eye")
+        right_eye_folder = os.path.join(output_folder, "right_eye")
+        combined_eye_folder = os.path.join(output_folder, "combined_eye")
+        os.makedirs(left_eye_folder, exist_ok=True)
+        os.makedirs(right_eye_folder, exist_ok=True)
+        os.makedirs(combined_eye_folder, exist_ok=True)
 
-    # Save eye images and information
-    left_eye_path = os.path.join(output_folder, f"{name}_left_eye{ext}")
-    right_eye_path = os.path.join(output_folder, f"{name}_right_eye{ext}")
-    cv2.imwrite(left_eye_path, left_eye)
-    cv2.imwrite(right_eye_path, right_eye)
+        # 눈 방향에 따른 하위 폴더 생성
+        for direction in ['Left', 'Right', 'Up', 'Down', 'Center']:
+            os.makedirs(os.path.join(left_eye_folder, direction), exist_ok=True)
+            os.makedirs(os.path.join(right_eye_folder, direction), exist_ok=True)
 
-    info_file = os.path.join(output_folder, f"{name}_eye_info.txt")
-    with open(info_file, "w") as f:
-        f.write(f"Left Eye Iris Status: {iris_status.split(', ')[0].split(': ')[1]}\n")
-        f.write(f"Right Eye Iris Status: {iris_status.split(', ')[1].split(': ')[1]}\n")
+        # 사용자명 앞에 추가하여 저장
+        left_eye_filename = os.path.join(left_eye_folder, left_iris_status, f"{username}_left_" + Path(image_path).name)
+        right_eye_filename = os.path.join(right_eye_folder, right_iris_status, f"{username}_right_" + Path(image_path).name)
 
-    print(f"Processed {image_path} and saved to {final_image_path}, {left_eye_path}, {right_eye_path}, and {info_file}")
+        cv2.imwrite(left_eye_filename, left_eye)
+        cv2.imwrite(right_eye_filename, right_eye)
+
+        # 눈 이미지 상하 배치 및 저장
+        combined_eye_image = np.vstack([left_eye, right_eye])
+        combined_eye_filename = os.path.join(combined_eye_folder, f"{username}_" + Path(image_path).name)
+        cv2.imwrite(combined_eye_filename, combined_eye_image)
+
+        # 로그 파일에 기록
+        with open(os.path.join(output_folder, "log.txt"), "a") as log_file:
+            log_file.write(f"{Path(image_path).name}: Left Eye: {left_iris_status}, Right Eye: {right_iris_status}\n")
 
 
-def process_folder(input_folder, output_folder):
-    Path(output_folder).mkdir(parents=True, exist_ok=True)
-
-    for image_file in os.listdir(input_folder):
-        if image_file.lower().endswith(('png', 'jpg', 'jpeg')):
-            image_path = os.path.join(input_folder, image_file)
-            process_image(image_path, output_folder)
-
-
-# 입력 폴더 내의 서브 폴더를 사용자명으로 사용
-user_folders = [f for f in os.listdir(base_input_folder) if os.path.isdir(os.path.join(base_input_folder, f))]
-
-for username in user_folders:
-    input_folder = os.path.join(base_input_folder, username)
-    output_folder = os.path.join(base_output_folder, username)
-
-    process_folder(input_folder, output_folder)
-
-print("Processing completed.")
+if __name__ == "__main__":
+    files = list(Path(base_input_folder).rglob("*.jpg"))
+    for file_path in files:
+        username = os.path.basename(os.path.dirname(file_path))
+        process_image(file_path, base_output_folder, username)
+    print("Processing completed.")
