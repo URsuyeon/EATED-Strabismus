@@ -175,3 +175,4 @@ if __name__ == "__main__":
         username = os.path.basename(os.path.dirname(file_path))
         process_image(file_path, base_output_folder, username)
     print("Processing completed.")
+
