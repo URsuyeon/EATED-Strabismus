@@ -1,0 +1,178 @@
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Conv2D, BatchNormalization, ReLU, Add, Input
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from sklearn.metrics import confusion_matrix, roc_curve, auc
+import matplotlib.pyplot as plt
+import seaborn as sns
+from PIL import Image
+
+# 데이터 경로 설정
+train_dir = r"C:\Users\EH\Desktop\eated\data\AI\Train"
+val_dir = r"C:\Users\EH\Desktop\eated\data\AI\Validation"
+test_dir = r"C:\Users\EH\Desktop\eated\data\AI\Test"
+
+
+# 이미지 로드 함수 (32x32 크기로 사용)
+def load_images_from_folder(folder, image_size=(32, 32)):
+    images = []
+    labels = []
+    for label, category in enumerate(['Abnormal', 'Normal']):
+        category_folder = os.path.join(folder, category)
+        for filename in os.listdir(category_folder):
+            img_path = os.path.join(category_folder, filename)
+            img = Image.open(img_path).resize(image_size)  # 이미지를 32x32로 조정
+            img = np.array(img)  # 정규화 없이 사용
+            images.append(img)
+            labels.append(label)
+    return np.array(images), np.array(labels)
+
+
+# 데이터 로드
+train_images, train_labels = load_images_from_folder(train_dir)
+val_images, val_labels = load_images_from_folder(val_dir)
+test_images, test_labels = load_images_from_folder(test_dir)
+
+
+# 데이터셋 생성 함수
+def create_tf_dataset(images, labels, batch_size=32, shuffle=True):
+    dataset = tf.data.Dataset.from_tensor_slices((images, labels))
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=len(images))
+    dataset = dataset.batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
+    return dataset
+
+
+# 데이터셋 생성
+train_ds = create_tf_dataset(train_images, train_labels)
+val_ds = create_tf_dataset(val_images, val_labels, shuffle=False)
+test_ds = create_tf_dataset(test_images, test_labels, shuffle=False)
+
+
+# Residual Block 정의
+def residual_block(x, filters, kernel_size=3, stride=1, use_identity=True):
+    shortcut = x
+
+    x = Conv2D(filters, kernel_size, strides=stride, padding='same', use_bias=False)(x)
+    x = BatchNormalization()(x)
+    x = ReLU()(x)
+
+    x = Conv2D(filters, kernel_size, strides=1, padding='same', use_bias=False)(x)
+    x = BatchNormalization()(x)
+
+    if stride != 1:
+        shortcut = Conv2D(filters, (1, 1), strides=stride, padding='same', use_bias=False)(shortcut)
+        shortcut = BatchNormalization()(shortcut)
+
+    if use_identity:
+        x = Add()([x, shortcut])
+        x = ReLU()(x)
+
+    return x
+
+
+
+def create_resnet18_model(input_shape=(32, 32, 3), num_classes=2):
+    inputs = Input(shape=input_shape)
+
+    # Initial Conv Layer
+    x = Conv2D(64, (7, 7), strides=2, padding='same', use_bias=False)(inputs)
+    x = BatchNormalization()(x)
+    x = ReLU()(x)
+
+    # Max Pooling
+    x = tf.keras.layers.MaxPooling2D((3, 3), strides=2, padding='same')(x)
+
+    # Residual Blocks
+    x = residual_block(x, 64)
+    x = residual_block(x, 64, use_identity=False)
+
+    x = residual_block(x, 128, stride=2)
+    x = residual_block(x, 128, use_identity=False)
+
+    x = residual_block(x, 256, stride=2)
+    x = residual_block(x, 256, use_identity=False)
+
+    x = residual_block(x, 512, stride=2)
+    x = residual_block(x, 512, use_identity=False)
+
+    # Global Average Pooling and Dense Layer
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(1024, activation='relu')(x)
+    predictions = Dense(num_classes, activation='softmax')(x)
+
+    model = Model(inputs=inputs, outputs=predictions)
+    model.compile(optimizer=Adam(), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+
+model = create_resnet18_model()
+
+# 모델 학습
+history = model.fit(train_ds, epochs=100, validation_data=val_ds)
+
+# 평가 및 시각화
+# 손실 및 정확도 그래프
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Val Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.title('Loss Curve')
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'], label='Val Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.title('Accuracy Curve')
+
+plt.tight_layout()
+plt.show()
+
+# 테스트 데이터 평가
+test_loss, test_accuracy = model.evaluate(test_ds)
+print(f'Test Loss: {test_loss:.4f}')
+print(f'Test Accuracy: {test_accuracy:.4f}')
+
+# Confusion Matrix
+test_predictions = model.predict(test_ds)
+test_predictions = np.argmax(test_predictions, axis=1)
+
+# test_labels 변환
+test_labels = np.concatenate([y for x, y in test_ds], axis=0)
+
+# Confusion Matrix
+cm = confusion_matrix(test_labels, test_predictions)
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Abnormal', 'Normal'],
+            yticklabels=['Abnormal', 'Normal'])
+plt.xlabel('Predicted')
+plt.ylabel('True')
+plt.title('Confusion Matrix')
+plt.show()
+
+# ROC Curve
+test_predictions_proba = model.predict(test_ds)
+test_predictions_proba = test_predictions_proba[:, 1]  # Positive class 확률
+
+fpr, tpr, _ = roc_curve(test_labels, test_predictions_proba)
+roc_auc = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc="lower right")
+plt.show()
