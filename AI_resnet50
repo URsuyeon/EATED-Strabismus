@@ -75,7 +75,7 @@ def create_resnet50_model(input_shape=(32, 32, 3), num_classes=2):
 model = create_resnet50_model()
 
 # 모델 학습
-history = model.fit(train_ds, epochs=100, validation_data=val_ds, class_weight=class_weights)
+history = model.fit(train_ds, epochs=120, validation_data=val_ds, class_weight=class_weights)
 
 # 평가 및 시각화
 # 손실 및 정확도 그래프
