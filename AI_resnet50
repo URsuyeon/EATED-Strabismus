@@ -1,0 +1,140 @@
+import os
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from sklearn.metrics import confusion_matrix, roc_curve, auc
+import matplotlib.pyplot as plt
+import seaborn as sns
+from PIL import Image
+
+# 데이터 경로 설정
+train_dir = r"C:\Users\EH\Desktop\eated\data\AI\Train"
+val_dir = r"C:\Users\EH\Desktop\eated\data\AI\Validation"
+test_dir = r"C:\Users\EH\Desktop\eated\data\AI\Test"
+
+# 이미지 로드 함수 (32x32 크기로 사용)
+def load_images_from_folder(folder, image_size=(32, 32)):
+    images = []
+    labels = []
+    for label, category in enumerate(['Abnormal', 'Normal']):
+        category_folder = os.path.join(folder, category)
+        for filename in os.listdir(category_folder):
+            img_path = os.path.join(category_folder, filename)
+            img = Image.open(img_path).resize(image_size)  # 이미지를 32x32로 조정
+            img = np.array(img)  # 정규화 없이 사용
+            images.append(img)
+            labels.append(label)
+    return np.array(images), np.array(labels)
+
+# 데이터 로드
+train_images, train_labels = load_images_from_folder(train_dir)
+val_images, val_labels = load_images_from_folder(val_dir)
+test_images, test_labels = load_images_from_folder(test_dir)
+
+# 데이터셋 생성 함수
+def create_tf_dataset(images, labels, batch_size=32, shuffle=True):
+    dataset = tf.data.Dataset.from_tensor_slices((images, labels))
+    if shuffle:
+        dataset = dataset.shuffle(buffer_size=len(images))
+    dataset = dataset.batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
+    return dataset
+
+# 데이터셋 생성
+train_ds = create_tf_dataset(train_images, train_labels)
+val_ds = create_tf_dataset(val_images, val_labels, shuffle=False)
+test_ds = create_tf_dataset(test_images, test_labels, shuffle=False)
+
+# 클래스 가중치 계산
+def compute_class_weights(labels):
+    class_weights = {}
+    num_classes = len(np.unique(labels))
+    for i in range(num_classes):
+        class_weights[i] = 1 / np.sum(labels == i)
+    total_weight = np.sum(list(class_weights.values()))
+    for key in class_weights.keys():
+        class_weights[key] = total_weight / class_weights[key]
+    return class_weights
+
+class_weights = compute_class_weights(train_labels)
+
+# ResNet18 모델 정의 (입력 크기 32x32로 변경)
+def create_resnet50_model(input_shape=(32, 32, 3), num_classes=2):
+    base_model = ResNet50(weights=None, include_top=False, input_shape=input_shape)
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(1024, activation='relu')(x)
+    predictions = Dense(num_classes, activation='softmax')(x)
+
+    model = Model(inputs=base_model.input, outputs=predictions)
+    model.compile(optimizer=Adam(), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+model = create_resnet50_model()
+
+# 모델 학습
+history = model.fit(train_ds, epochs=100, validation_data=val_ds, class_weight=class_weights)
+
+# 평가 및 시각화
+# 손실 및 정확도 그래프
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 2, 1)
+plt.plot(history.history['loss'], label='Train Loss')
+plt.plot(history.history['val_loss'], label='Val Loss')
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+plt.legend()
+plt.title('Loss Curve')
+
+plt.subplot(1, 2, 2)
+plt.plot(history.history['accuracy'], label='Train Accuracy')
+plt.plot(history.history['val_accuracy'], label='Val Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.legend()
+plt.title('Accuracy Curve')
+
+plt.tight_layout()
+plt.show()
+
+# 테스트 데이터 평가
+test_loss, test_accuracy = model.evaluate(test_ds)
+
+# Confusion Matrix
+test_predictions = model.predict(test_ds)
+test_predictions = np.argmax(test_predictions, axis=1)
+
+# test_labels 변환
+test_labels = np.concatenate([y for x, y in test_ds], axis=0)
+
+# Confusion Matrix
+cm = confusion_matrix(test_labels, test_predictions)
+plt.figure(figsize=(8, 6))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Abnormal', 'Normal'],
+            yticklabels=['Abnormal', 'Normal'])
+plt.xlabel('Predicted')
+plt.ylabel('True')
+plt.title('Confusion Matrix')
+plt.show()
+
+# ROC Curve
+# 예측 확률
+test_predictions_proba = model.predict(test_ds)
+test_predictions_proba = test_predictions_proba[:, 1]  # Positive class 확률
+
+fpr, tpr, _ = roc_curve(test_labels, test_predictions_proba)
+roc_auc = auc(fpr, tpr)
+
+plt.figure()
+plt.plot(fpr, tpr, color='darkorange', lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('Receiver Operating Characteristic')
+plt.legend(loc="lower right")
+plt.show()
