@@ -9,10 +9,12 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from PIL import Image
 
+# 데이터 경로 설정
 train_dir = r"C:\Users\EH\Desktop\eated\data\AI\Train"
 val_dir = r"C:\Users\EH\Desktop\eated\data\AI\Validation"
 test_dir = r"C:\Users\EH\Desktop\eated\data\AI\Test"
 
+# 이미지 로드 함수 (32x32 크기)
 def load_images_from_folder(folder, image_size=(32, 32)):
     images = []
     labels = []
@@ -32,7 +34,7 @@ train_images, train_labels = load_images_from_folder(train_dir)
 val_images, val_labels = load_images_from_folder(val_dir)
 test_images, test_labels = load_images_from_folder(test_dir)
 
-
+# 데이터셋 생성 함수
 def create_tf_dataset(images, labels, batch_size=32, shuffle=True):
     dataset = tf.data.Dataset.from_tensor_slices((images, labels))
     if shuffle:
@@ -40,12 +42,12 @@ def create_tf_dataset(images, labels, batch_size=32, shuffle=True):
     dataset = dataset.batch(batch_size).prefetch(buffer_size=tf.data.AUTOTUNE)
     return dataset
 
-
+# 데이터셋 생성
 train_ds = create_tf_dataset(train_images, train_labels)
 val_ds = create_tf_dataset(val_images, val_labels, shuffle=False)
 test_ds = create_tf_dataset(test_images, test_labels, shuffle=False)
 
-
+# 클래스 가중치 계산
 def compute_class_weights(labels):
     class_weights = {}
     num_classes = len(np.unique(labels))
@@ -60,7 +62,7 @@ def compute_class_weights(labels):
 
 class_weights = compute_class_weights(train_labels)
 
-
+# Residual Block 정의의
 def residual_block(x, filters, kernel_size=3, stride=1, use_identity=True):
     shortcut = x
 
@@ -117,9 +119,10 @@ def create_resnet18_model(input_shape=(32, 32, 3), num_classes=2, learning_rate=
     return model
 
 
-learning_rate = 0.001  # 원하는 Learning Rate로 변경
+learning_rate = 0.001 
 model = create_resnet18_model(learning_rate=learning_rate)
 
+# 모델 학습
 history = model.fit(
     train_ds,
     epochs=100,
@@ -127,6 +130,8 @@ history = model.fit(
     class_weight=class_weights
 )
 
+# 평가 및 시각화
+# 손실 및 정확도 그래ㅠㅡ
 plt.figure(figsize=(12, 6))
 
 plt.subplot(1, 2, 1)
@@ -148,15 +153,19 @@ plt.title('Accuracy Curve')
 plt.tight_layout()
 plt.show()
 
+# 테스트 데이터 평가
 test_loss, test_accuracy = model.evaluate(test_ds)
 print(f'Test Loss: {test_loss:.4f}')
 print(f'Test Accuracy: {test_accuracy:.4f}')
 
+# Confusion Matrix
 test_predictions = model.predict(test_ds)
 test_predictions = np.argmax(test_predictions, axis=1)
 
+# test_labels 변환
 test_labels = np.concatenate([y for x, y in test_ds], axis=0)
 
+# Confusion Matrix
 cm = confusion_matrix(test_labels, test_predictions)
 plt.figure(figsize=(8, 6))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Abnormal', 'Normal'],
@@ -166,6 +175,7 @@ plt.ylabel('True')
 plt.title('Confusion Matrix')
 plt.show()
 
+# ROC Curve
 test_predictions_proba = model.predict(test_ds)
 test_predictions_proba = test_predictions_proba[:, 1]  # Positive class 확률
 
