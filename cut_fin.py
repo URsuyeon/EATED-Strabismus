@@ -7,10 +7,10 @@ from pathlib import Path
 # 상수 정의
 PADDING = 30
 FACE_SIZE = (1024, 1024)
-FINAL_SIZE = (32, 16)
-threshold_X = 0
-threshold_Y = 0.1
-threshold_close = 0.28
+FINAL_SIZE = (256, 128)
+threshold_X = 0.08
+threshold_Y = 0.16
+threshold_close = 0.32
 
 # Mediapipe 초기화
 mp_face_mesh = mp.solutions.face_mesh
@@ -18,8 +18,8 @@ face_mesh = mp_face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refin
 mp_face_detection = mp.solutions.face_detection
 
 # 입력 폴더와 출력 폴더의 기본 경로
-base_input_folder = r'C:\Users\user\Desktop\data\eyes'
-base_output_folder = r'C:\Users\user\Desktop\data\cropped'
+base_input_folder = r'C:\Users\SU\Desktop\DOT DELETE\normal_team'
+base_output_folder = r'C:\Users\SU\Desktop\DOT DELETE\testing'
 
 # 눈의 랜드마크 인덱스 정의
 LEFT_EYE_INDICES = [33, 246, 161, 160, 159, 158, 157, 173, 133, 155, 154, 153, 145, 144, 163, 7]
@@ -48,11 +48,11 @@ def determine_iris_position(eye_center, iris_center, eye_aspect_ratio):
     x_ratio = (iris_center[0] - eye_center[0]) / (FINAL_SIZE[0] / 2)
     y_ratio = (iris_center[1] - eye_center[1]) / (FINAL_SIZE[1] / 2)
 
+    if abs(x_ratio) > threshold_X:
+        return 'Left' if x_ratio < 0 else 'Right'
     if eye_aspect_ratio < threshold_close:
         return 'Down'
-    if abs(x_ratio) > (0.5 - threshold_X):
-        return 'Left' if x_ratio < 0 else 'Right'
-    if abs(y_ratio) > (0.5 - threshold_Y):
+    if abs(y_ratio) > threshold_Y:
         return 'Up' if y_ratio < 0 else 'Down'
     return 'Center'
 
